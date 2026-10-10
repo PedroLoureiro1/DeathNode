@@ -1,0 +1,12 @@
+{
+  "report_id": "abc123",
+  "timestamp": "2025-10-28T12:00:00Z",
+  "reporter_pseudonym": "peer1",
+  "content": {
+    "suspect": "john_doe",
+    "description": "Alleged involvement in organized crime",
+    "location": "Tokyo, Japan"
+  },
+  "version": 2,
+  "status": "pending_validation"
+}

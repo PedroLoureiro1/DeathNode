@@ -1,0 +1,134 @@
+@startuml
+' Configuração visual para manter o estilo solicitado
+hide circle
+skinparam class {
+    BackgroundColor White
+    ArrowColor #228B22
+    BorderColor #228B22
+}
+skinparam package {
+    BackgroundColor #F9F9F9
+    BorderColor #A0A0A0
+}
+
+title DeathNode System Architecture - Final Production Model
+
+' ==========================================================
+' 1. CÓDIGO PARTILHADO (Core Logic)
+' ==========================================================
+package "shared/deathnote_lib" as Shared {
+    class "crypto_utils.py" as CryptoUtils {
+        + generate_symmetric_key()
+        + encrypt_data(data, key)
+        + decrypt_data(ciphertext, key, nonce)
+        + sign_data(data, private_key_pem)
+        + verify_signature(data, signature, public_key_pem)
+        + compute_hash(data)
+        + compute_chain_hash(prev_hash, current_data)
+        + derive_key_from_secret(shared_secret, salt, info=b'')
+        + compute_key_fingerprint(public_key_pem)
+    }
+
+    class "protections.py" as Protections {
+        + protect(document, private_key_pem, shared_secret, document_id, prev_hash=None) : JSON
+        + check(bundle) : Dict
+        + unprotect(protected_document, shared_secret, prev_hash=None) : Dict
+        + get_chain_hash(protected_document, shared_secret) : bytes
+        + verify_chain(protected_documents, shared_secret, local_documents=None, prev_hash=None) : Dict
+    }
+    
+    Protections ..> CryptoUtils : uses
+}
+
+' ==========================================================
+' 2. COMPONENTES DO CLIENTE (CLI)
+' ==========================================================
+package "Client VM (Peer)" {
+    class "main.py" as ClientCLI {
+        -- Commands (CLI Interface) --
+        + protect(input, priv_key, secret, doc_id, output, options)
+        + upload(protected_file)
+        + download(doc_id)
+        + check(protected_file)
+        + unprotect(protected_file, secret)
+        + chain-verify()
+        + vigilant-status()
+        + server-status()
+        -- Internal Logic --
+        - get_next_id_from_server(server_url) : int
+        - load_previous_hash(hash_file) : string
+    }
+    ClientCLI ..> Protections : uses
+}
+
+' ==========================================================
+' 3. INFRAESTRUTURA E SEGURANÇA (Vigilant)
+' ==========================================================
+package "Vigilante VM (API Gateway/Vigilant)" {
+    class "Vigilant.py" as Vigilant {
+        - users_cache : Map<User, PublicKey>
+        - seen_nonces : Set<Nonce>
+        - banned_ips : Map<IP, Expiry>
+        - banned_users : Map<Username, Expiry>
+        - user_uploads : <Username, List[Timestamps]>
+        - ip_failed_attempts : <IP, List[Timestamps, Reason]
+        -- Methods --
+        + load_users_from_server() : Bool
+        + get_user_public_key(username) : PublicKey?
+        + verify_payload_signature(data, public_key) : Bool
+        + find_signer_username(data) : Username?
+        + is_banned(username) : Bool
+        + ban_user(username, duration_minutes=None) : Void
+        + get_ban_info(username) : BanInfo?
+        + is_ip_banned(ip) : Bool
+        + ban_ip(ip, duration_minutes=None) : Void
+        + is_spam(username, threshold=2, window_seconds=60) : Bool
+        + vigilante_upload() : Response
+    }
+    Vigilant ..> Protections : uses
+}
+
+package "Server VM (Flask Backend)" {
+    class "server.py" as Server {
+        - db_conn : SSLContext
+        - upload_lock : Mutex
+        -- Methods --
+        + upload_document(json)
+        + get_documents()
+        + get_last_document() : JSON
+        + get_users() : List[PubKeys]
+    }
+    Server ..> Protections : uses 
+}
+
+' ==========================================================
+' 4. BASE DE DADOS (PostgreSQL)
+' ==========================================================
+package "Database VM (PostgreSQL 17)" as DB_Package {
+    class "users" as T_Users {
+        + id : SERIAL <<PK>>
+        + username : VARCHAR(50) <<Unique>>
+        + public_key : TEXT
+        + is_active : BOOLEAN DEFAULT TRUE
+        + joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    }
+
+    class "documents" as T_Docs {
+        + id : SERIAL <<PK>>
+        + ciphertext_hash : CHAR(64)
+        + encrypted_payload : JSONB
+        + payload_signature : TEXT
+        + payload_hash : TEXT
+        + created_at : TIMESTAMP
+    }
+}
+
+' ==========================================================
+' LIGAÇÕES E PROTOCOLOS
+' ==========================================================
+
+ClientCLI -right-> Vigilant : "HTTPS (mTLS)\nPort 6000"
+Vigilant -down-> Server : "mTLS (Internal)\nPort 5000"
+Server -down-> DB_Package : "SSL verify-full\n(Port 5432)"
+
+@enduml
